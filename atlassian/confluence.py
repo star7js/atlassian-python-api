@@ -5,12 +5,12 @@ import time
 import json
 import re
 from requests import HTTPError
-import requests
 from deprecated import deprecated
 from bs4 import BeautifulSoup
 from atlassian import utils
 from .errors import ApiError, ApiNotFoundError, ApiPermissionError, ApiValueError, ApiConflictError, ApiNotAcceptable
 from .rest_client import AtlassianRestAPI
+from security import safe_requests
 
 log = logging.getLogger(__name__)
 
@@ -2568,7 +2568,7 @@ class Confluence(AtlassianRestAPI):
                 log.error("Failed to get download PDF url.")
                 raise ApiNotFoundError("Failed to export page as PDF", reason="Failed to get download PDF url.")
             # To download the PDF file, the request should be with no headers of authentications.
-            return requests.get(url, timeout=75).content
+            return safe_requests.get(url, timeout=75).content
         return self.get(url, headers=headers, not_json_response=True)
 
     def get_page_as_word(self, page_id):
