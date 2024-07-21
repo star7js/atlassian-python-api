@@ -81,7 +81,7 @@ def get_projects(token_json):
             "Authorization": "Bearer {}".format(token_json["access_token"]),
             "Accept": "application/json",
         },
-    )
+    timeout=60)
     req.raise_for_status()
     resources = req.json()
     cloud_id = resources[0]["id"]
