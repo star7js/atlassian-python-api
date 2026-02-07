@@ -2,6 +2,8 @@
 
 import copy
 import logging
+import os
+from urllib.parse import urljoin
 from requests import HTTPError
 from ..rest_client import AtlassianRestAPI
 
@@ -185,3 +187,96 @@ class ConfluenceBase(AtlassianRestAPI):
                 raise HTTPError(error_msg, response=response)
         else:
             response.raise_for_status()
+
+    def get_attachments_from_content(
+        self,
+        page_id,
+        start=0,
+        limit=50,
+        expand=None,
+        filename=None,
+        media_type=None,
+    ):
+        """
+        Get attachments for content (page/blog/etc).
+
+        :param page_id: str: content id
+        :param start: int: pagination start
+        :param limit: int: pagination limit
+        :param expand: str: expand fields
+        :param filename: str: filter by filename
+        :param media_type: str: filter by media type
+        :return: response dict
+        """
+        params = {"start": start, "limit": limit}
+        if expand is not None:
+            params["expand"] = expand
+        if filename is not None:
+            params["filename"] = filename
+        if media_type is not None:
+            params["mediaType"] = media_type
+        return self.get(f"content/{page_id}/child/attachment", params=params)
+
+    def _resolve_attachment_download_url(self, attachment):
+        """
+        Resolve the download URL for an attachment result item.
+
+        :param attachment: dict: attachment object from Confluence API
+        :return: (download_url, is_absolute) tuple or (None, False) if not resolvable
+        """
+        if not isinstance(attachment, dict):
+            return None, False
+        links = attachment.get("_links", {}) or {}
+        download = links.get("download") or attachment.get("download")
+        if not download:
+            return None, False
+        if download.startswith("http://") or download.startswith("https://"):
+            return download, True
+        base = links.get("base") or self.url
+        if base:
+            return urljoin(base.rstrip("/") + "/", download.lstrip("/")), True
+        return self._sub_url(download), False
+
+    def download_attachments_from_page(self, page_id, path=None):
+        """
+        Download attachments from a page to the local filesystem.
+
+        :param page_id: str: content id
+        :param path: str: target directory, defaults to cwd
+        :return: summary string
+        """
+        if path is None:
+            path = os.getcwd()
+        if not os.path.isdir(path):
+            raise FileNotFoundError("Verify if directory path is correct and/or if directory exists")
+
+        params = {"start": 0, "limit": 50}
+        attachments = list(self._get_paged(f"content/{page_id}/child/attachment", params=params))
+        if not attachments:
+            return "No attachments found on the Confluence page"
+
+        downloaded = 0
+        skipped = 0
+        failed = 0
+
+        for attachment in attachments:
+            filename = attachment.get("title") or attachment.get("filename") or str(attachment.get("id", ""))
+            if not filename:
+                failed += 1
+                continue
+            file_path = os.path.join(path, filename)
+            if os.path.exists(file_path):
+                skipped += 1
+                continue
+
+            download_url, is_absolute = self._resolve_attachment_download_url(attachment)
+            if not download_url:
+                failed += 1
+                continue
+
+            content = self.get(download_url, not_json_response=True, absolute=is_absolute)
+            with open(file_path, "wb") as f:
+                f.write(content)
+            downloaded += 1
+
+        return f"Downloaded {downloaded} attachment(s). Skipped {skipped}. Failed {failed}."

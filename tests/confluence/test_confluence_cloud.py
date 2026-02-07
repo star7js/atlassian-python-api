@@ -246,6 +246,30 @@ class TestConfluenceCloud:
         assert result == {"results": [{"id": "att1", "title": "Test Attachment"}]}
 
     @patch.object(ConfluenceCloud, "get")
+    def test_get_attachments_from_content(self, mock_get, confluence_cloud):
+        """Test get_attachments_from_content method."""
+        mock_get.return_value = {"results": [{"id": "att1", "title": "Test Attachment"}]}
+        result = confluence_cloud.get_attachments_from_content(
+            "123",
+            start=10,
+            limit=25,
+            expand="version",
+            filename="file.txt",
+            media_type="text/plain",
+        )
+        mock_get.assert_called_once_with(
+            "content/123/child/attachment",
+            params={
+                "start": 10,
+                "limit": 25,
+                "expand": "version",
+                "filename": "file.txt",
+                "mediaType": "text/plain",
+            },
+        )
+        assert result == {"results": [{"id": "att1", "title": "Test Attachment"}]}
+
+    @patch.object(ConfluenceCloud, "get")
     def test_get_attachment(self, mock_get, confluence_cloud):
         """Test get_attachment method."""
         mock_get.return_value = {"id": "att1", "title": "Test Attachment"}
@@ -278,6 +302,37 @@ class TestConfluenceCloud:
         result = confluence_cloud.delete_attachment("att1")
         mock_delete.assert_called_once_with("content/att1", **{})
         assert result == {"success": True}
+
+    @patch.object(ConfluenceCloud, "_get_paged")
+    def test_download_attachments_from_page_empty(self, mock_get_paged, confluence_cloud, tmp_path):
+        """Test download_attachments_from_page with no attachments."""
+        mock_get_paged.return_value = []
+        result = confluence_cloud.download_attachments_from_page("123", path=str(tmp_path))
+        assert result == "No attachments found on the Confluence page"
+        mock_get_paged.assert_called_once_with("content/123/child/attachment", params={"start": 0, "limit": 50})
+
+    @patch.object(ConfluenceCloud, "_get_paged")
+    @patch.object(ConfluenceCloud, "get")
+    def test_download_attachments_from_page_downloads(self, mock_get, mock_get_paged, confluence_cloud, tmp_path):
+        """Test download_attachments_from_page downloads all attachments."""
+        mock_get_paged.return_value = [
+            {
+                "id": "1",
+                "title": "a.txt",
+                "_links": {"download": "/download/attachments/1/a.txt", "base": "https://test.atlassian.net"},
+            },
+            {
+                "id": "2",
+                "title": "b.txt",
+                "_links": {"download": "https://files.example.com/b.txt"},
+            },
+        ]
+        mock_get.return_value = b"data"
+        result = confluence_cloud.download_attachments_from_page("123", path=str(tmp_path))
+        assert (tmp_path / "a.txt").read_bytes() == b"data"
+        assert (tmp_path / "b.txt").read_bytes() == b"data"
+        assert result == "Downloaded 2 attachment(s). Skipped 0. Failed 0."
+        assert mock_get.call_count == 2
 
     # Comment Management Tests
     @patch.object(ConfluenceCloud, "get")
